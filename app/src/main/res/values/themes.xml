@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.MilenijumSms" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/brass</item>
+        <item name="colorPrimaryDark">@color/charcoal</item>
+        <item name="colorAccent">@color/brass</item>
+        <item name="android:windowBackground">@color/bg</item>
+    </style>
+</resources>
