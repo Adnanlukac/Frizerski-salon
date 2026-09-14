@@ -9,7 +9,7 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
- * ApiClient.kt — svi pozivi ka api/device/*.php rutama na sajtu.
+ * ApiClient.kt — svi pozivi ka api/device rutama na sajtu (pending, potvrdi, heartbeat, upari).
  * Sve funkcije su BLOKIRAJUĆE (rade sinhrono) — pozivati ih iz pozadinske
  * niti/korutine, nikad direktno sa glavne niti.
  */
