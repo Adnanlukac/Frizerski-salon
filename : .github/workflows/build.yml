@@ -1,0 +1,31 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Preuzmi kod
+        uses: actions/checkout@v4
+
+      - name: Podesi Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Podesi Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Kompajliraj APK (debug)
+        run: gradle assembleDebug --no-daemon
+
+      - name: Sačuvaj APK kao preuzimljiv fajl
+        uses: actions/upload-artifact@v4
+        with:
+          name: milenijum-sms-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
