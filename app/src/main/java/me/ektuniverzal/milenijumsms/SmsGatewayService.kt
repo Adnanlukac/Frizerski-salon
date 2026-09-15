@@ -99,42 +99,45 @@ class SmsGatewayService : Service() {
     }
 
     /**
-     * Šalje SMS (dijeli na više dijelova ako je duži od 160 karaktera) i
-     * čeka potvrdu operatera da je poruka PRIHVAĆENA za slanje (ne čeka
-     * i isporuku klijentu — to bi trajalo neizvjesno dugo).
+     * Šalje SMS (dijeli na više dijelova ako je duži od granice — poruke sa
+     * š/đ/č/ć/ž koriste UTF-16 kodiranje, pa je granica ~70 karaktera po
+     * dijelu umjesto 160) i čeka potvrdu operatera da su SVI dijelovi
+     * PRIHVAĆENI za slanje.
+     *
+     * Svaki dio dobija SVOJU jedinstvenu akciju (umjesto oslanjanja na
+     * "index" u intent extras, što neki Android uređaji/proizvođači ne
+     * prenesu pouzdano kroz sistemski broadcast) — tako brojanje potvrda
+     * radi tačno bez obzira na uređaj.
      */
     private suspend fun posaljiSmsIsacekajRezultat(telefon: String, poruka: String): Boolean =
         suspendCancellableCoroutine { nastavak ->
             try {
                 val smsManager = getSystemService(SmsManager::class.java)
                 val dijelovi = smsManager.divideMessage(poruka)
-
                 val actionId = System.currentTimeMillis().toInt()
-                val action = "$ACTION_SMS_SENT.$actionId"
 
-                val svePotvrdjeno = BooleanArray(dijelovi.size) { false }
-                val sveUspjesno = BooleanArray(dijelovi.size) { true }
                 var brojPotvrdjenih = 0
+                var sveUspjesno = true
+
+                val filter = IntentFilter()
+                for (i in dijelovi.indices) {
+                    filter.addAction("$ACTION_SMS_SENT.$actionId.$i")
+                }
 
                 val receiver = object : BroadcastReceiver() {
                     override fun onReceive(context: Context, intent: Intent) {
-                        val index = intent.getIntExtra("index", 0)
                         val uspjeh = resultCode == android.app.Activity.RESULT_OK
-                        if (!svePotvrdjeno[index]) {
-                            svePotvrdjeno[index] = true
-                            sveUspjesno[index] = uspjeh
-                            brojPotvrdjenih++
-                        }
+                        if (!uspjeh) sveUspjesno = false
+                        brojPotvrdjenih++
                         if (brojPotvrdjenih >= dijelovi.size) {
                             try { unregisterReceiver(this) } catch (e: Exception) { }
                             if (nastavak.isActive) {
-                                nastavak.resume(sveUspjesno.all { it })
+                                nastavak.resume(sveUspjesno)
                             }
                         }
                     }
                 }
 
-                val filter = IntentFilter(action)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
                 } else {
@@ -143,7 +146,7 @@ class SmsGatewayService : Service() {
 
                 val sentIntents = ArrayList<PendingIntent>()
                 for (i in dijelovi.indices) {
-                    val intent = Intent(action).putExtra("index", i)
+                    val intent = Intent("$ACTION_SMS_SENT.$actionId.$i")
                     val pi = PendingIntent.getBroadcast(
                         this, actionId + i, intent,
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
