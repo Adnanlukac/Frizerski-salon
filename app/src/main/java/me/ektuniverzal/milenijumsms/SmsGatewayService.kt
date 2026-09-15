@@ -3,18 +3,13 @@ package me.ektuniverzal.milenijumsms
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
-import android.content.BroadcastReceiver
-import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.os.Build
 import android.os.IBinder
 import android.telephony.SmsManager
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
-import kotlin.coroutines.resume
 
 /**
  * SmsGatewayService.kt
@@ -90,7 +85,7 @@ class SmsGatewayService : Service() {
         azurirajNotifikaciju("Šaljem ${zadaci.size} poruka...")
 
         for (zadatak in zadaci) {
-            val uspjeh = posaljiSmsIsacekajRezultat(zadatak.telefon, zadatak.poruka)
+            val uspjeh = posaljiSms(zadatak.telefon, zadatak.poruka)
             ApiClient.potvrdi(siteUrl, token, zadatak.id, uspjeh, if (uspjeh) null else "Slanje nije uspjelo na telefonu")
             if (uspjeh) Prefs.incrementPoslato(this) else Prefs.incrementNeuspjelo(this)
         }
@@ -101,80 +96,29 @@ class SmsGatewayService : Service() {
     /**
      * Šalje SMS (dijeli na više dijelova ako je duži od granice — poruke sa
      * š/đ/č/ć/ž koriste UTF-16 kodiranje, pa je granica ~70 karaktera po
-     * dijelu umjesto 160) i čeka potvrdu operatera da su SVI dijelovi
-     * PRIHVAĆENI za slanje.
+     * dijelu umjesto 160).
      *
-     * Svaki dio dobija SVOJU jedinstvenu akciju (umjesto oslanjanja na
-     * "index" u intent extras, što neki Android uređaji/proizvođači ne
-     * prenesu pouzdano kroz sistemski broadcast) — tako brojanje potvrda
-     * radi tačno bez obzira na uređaj.
+     * NAPOMENA: ne čeka se sistemska potvrda operatera ("sent broadcast") —
+     * na nekim uređajima/proizvođačima (npr. neki Xiaomi/HyperOS modeli) taj
+     * broadcast ne stiže pouzdano čak i kad je SMS stvarno uspješno poslat,
+     * što je dovodilo do pogrešnog prikaza "Greška" u adminu iako je poruka
+     * stigla klijentu. Status "Poslato" se sad javlja čim telefon preda
+     * poruku SIM kartici (standardan pristup za jednostavne SMS gateway-e).
      */
-    private suspend fun posaljiSmsIsacekajRezultat(telefon: String, poruka: String): Boolean =
-        suspendCancellableCoroutine { nastavak ->
-            try {
-                val smsManager = getSystemService(SmsManager::class.java)
-                val dijelovi = smsManager.divideMessage(poruka)
-                val actionId = System.currentTimeMillis().toInt()
-
-                var brojPotvrdjenih = 0
-                var sveUspjesno = true
-
-                val filter = IntentFilter()
-                for (i in dijelovi.indices) {
-                    filter.addAction("$ACTION_SMS_SENT.$actionId.$i")
-                }
-
-                val receiver = object : BroadcastReceiver() {
-                    override fun onReceive(context: Context, intent: Intent) {
-                        val uspjeh = resultCode == android.app.Activity.RESULT_OK
-                        if (!uspjeh) sveUspjesno = false
-                        brojPotvrdjenih++
-                        if (brojPotvrdjenih >= dijelovi.size) {
-                            try { unregisterReceiver(this) } catch (e: Exception) { }
-                            if (nastavak.isActive) {
-                                nastavak.resume(sveUspjesno)
-                            }
-                        }
-                    }
-                }
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-                } else {
-                    registerReceiver(receiver, filter)
-                }
-
-                val sentIntents = ArrayList<PendingIntent>()
-                for (i in dijelovi.indices) {
-                    val intent = Intent("$ACTION_SMS_SENT.$actionId.$i")
-                    val pi = PendingIntent.getBroadcast(
-                        this, actionId + i, intent,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                    )
-                    sentIntents.add(pi)
-                }
-
-                if (dijelovi.size == 1) {
-                    smsManager.sendTextMessage(telefon, null, dijelovi[0], sentIntents[0], null)
-                } else {
-                    smsManager.sendMultipartTextMessage(telefon, null, dijelovi, sentIntents, null)
-                }
-
-                // Sigurnosna kočnica — ako operater nikad ne odgovori, ne čekaj zauvijek
-                nastavak.invokeOnCancellation {
-                    try { unregisterReceiver(receiver) } catch (e: Exception) { }
-                }
-                scope.launch {
-                    delay(30_000)
-                    if (nastavak.isActive) {
-                        try { unregisterReceiver(receiver) } catch (e: Exception) { }
-                        nastavak.resume(false)
-                    }
-                }
-            } catch (e: Exception) {
-                if (nastavak.isActive) nastavak.resume(false)
+    private fun posaljiSms(telefon: String, poruka: String): Boolean {
+        return try {
+            val smsManager = getSystemService(SmsManager::class.java)
+            val dijelovi = smsManager.divideMessage(poruka)
+            if (dijelovi.size == 1) {
+                smsManager.sendTextMessage(telefon, null, dijelovi[0], null, null)
+            } else {
+                smsManager.sendMultipartTextMessage(telefon, null, dijelovi, null, null)
             }
+            true
+        } catch (e: Exception) {
+            false
         }
+    }
 
     private fun verzijaApp(): String {
         return try {
