@@ -15,11 +15,12 @@ import kotlinx.coroutines.*
  * SmsGatewayService.kt
  *
  * Foreground servis (ima stalno vidljivu obavijest — Android ga zato
- * ne gasi agresivno kao obične pozadinske zadatke). Svakih ~15 sekundi:
+ * ne gasi agresivno kao obične pozadinske zadatke). Svakih ~15 sekundi, za SVAKI uključeni sajt redom:
  *   1. pita sajt ima li SMS poruka na čekanju (api/device/pending.php)
- *   2. za svaku, šalje SMS preko SIM kartice telefona
+ *   2. za svaku, šalje SMS preko SIM kartice telefona (sa razmakom između poruka)
  *   3. javlja sajtu rezultat (api/device/potvrdi.php)
  *   4. javlja "još sam živ" (api/device/heartbeat.php) — za ONLINE status u adminu
+ * Svaki sajt koristi vlastiti token; sajtovi ne znaju jedni za druge.
  */
 class SmsGatewayService : Service() {
 
@@ -30,6 +31,7 @@ class SmsGatewayService : Service() {
         const val KANAL_ID = "milenijum_sms_gateway"
         const val NOTIFIKACIJA_ID = 1
         const val INTERVAL_MS = 15_000L
+        const val RAZMAK_SMS_MS = 1_500L
         const val ACTION_SMS_SENT = "me.ektuniverzal.milenijumsms.SMS_SENT"
     }
 
@@ -56,6 +58,8 @@ class SmsGatewayService : Service() {
         while (true) {
             try {
                 provjeriIObradiPoruke()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 azurirajNotifikaciju("Greška: ${e.message}")
             }
@@ -63,34 +67,59 @@ class SmsGatewayService : Service() {
         }
     }
 
+    /** Obilazi sve UKLJUČENE sajtove redom; greška na jednom sajtu ne zaustavlja ostale. */
     private suspend fun provjeriIObradiPoruke() {
-        val siteUrl = Prefs.getSiteUrl(this) ?: return
-        val token = Prefs.getDeviceToken(this) ?: return
+        val sajtovi = Prefs.getSites(this).filter { it.enabled }
+        if (sajtovi.isEmpty()) {
+            azurirajNotifikaciju("Nema uključenih sajtova")
+            return
+        }
+        var naCekanju = 0
+        var saGreskom = 0
+        for (sajt in sajtovi) {
+            try {
+                val rez = obradiSajt(sajt)
+                if (rez < 0) saGreskom++ else naCekanju += rez
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                saGreskom++
+                Prefs.setStatus(this, sajt.id, "Greška: ${e.message}")
+            }
+        }
+        val dio = if (saGreskom > 0) " · greška: $saGreskom" else ""
+        azurirajNotifikaciju("Sajtova: ${sajtovi.size}$dio · poslato ukupno: ${Prefs.getBrojPoslatih(this)}")
+    }
 
-        val heartbeatRes = ApiClient.heartbeat(siteUrl, token, verzijaApp())
+    /** Vraća broj poruka na čekanju na sajtu, ili -1 ako sajt nije dostupan / odbija token. */
+    private suspend fun obradiSajt(sajt: Site): Int {
+        val heartbeatRes = ApiClient.heartbeat(sajt.url, sajt.token, verzijaApp())
         val naCekanju = heartbeatRes.data ?: 0
 
-        val rezultat = ApiClient.preuzmiPending(siteUrl, token)
+        val rezultat = ApiClient.preuzmiPending(sajt.url, sajt.token)
         if (!rezultat.success) {
-            azurirajNotifikaciju("Greška veze — pokušavam ponovo za 15s")
-            return
+            val err = rezultat.error ?: ""
+            val tekst = if (err.startsWith("HTTP 401") || err.startsWith("HTTP 403"))
+                "Sajt odbija token — upari ponovo" else "Greška veze — pokušavam ponovo"
+            Prefs.setStatus(this, sajt.id, tekst)
+            return -1
         }
 
         val zadaci = rezultat.data ?: emptyList()
         if (zadaci.isEmpty()) {
-            azurirajNotifikaciju("Povezano · na čekanju: $naCekanju")
-            return
+            Prefs.setStatus(this, sajt.id, "Povezano · na čekanju: $naCekanju")
+            return naCekanju
         }
 
-        azurirajNotifikaciju("Šaljem ${zadaci.size} poruka...")
-
-        for (zadatak in zadaci) {
+        for ((i, zadatak) in zadaci.withIndex()) {
             val uspjeh = posaljiSms(zadatak.telefon, zadatak.poruka)
-            ApiClient.potvrdi(siteUrl, token, zadatak.id, uspjeh, if (uspjeh) null else "Slanje nije uspjelo na telefonu")
-            if (uspjeh) Prefs.incrementPoslato(this) else Prefs.incrementNeuspjelo(this)
+            ApiClient.potvrdi(sajt.url, sajt.token, zadatak.id, uspjeh, if (uspjeh) null else "Slanje nije uspjelo na telefonu")
+            Prefs.recordResult(this, sajt.id, uspjeh)
+            // razmak između poruka (zajednički za sve sajtove): operater ne voli "rafal" sa jedne SIM kartice
+            if (i < zadaci.size - 1) delay(RAZMAK_SMS_MS)
         }
-
-        azurirajNotifikaciju("Povezano · poslato ukupno: ${Prefs.getBrojPoslatih(this)}")
+        Prefs.setStatus(this, sajt.id, "Povezano · zadnje slanje: ${zadaci.size} poruka")
+        return 0
     }
 
     /**
@@ -131,9 +160,9 @@ class SmsGatewayService : Service() {
     private fun napraviNotifikacioniKanal() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val kanal = NotificationChannel(
-                KANAL_ID, "Milenijum SMS gateway", NotificationManager.IMPORTANCE_LOW
+                KANAL_ID, "SMS gateway", NotificationManager.IMPORTANCE_LOW
             )
-            kanal.description = "Prikazuje status veze sa sajtom i slanja SMS poruka"
+            kanal.description = "Prikazuje status veze sa sajtovima i slanja SMS poruka"
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(kanal)
         }
@@ -141,7 +170,7 @@ class SmsGatewayService : Service() {
 
     private fun izgradiNotifikaciju(tekst: String): Notification {
         return NotificationCompat.Builder(this, KANAL_ID)
-            .setContentTitle("Milenijum SMS gateway")
+            .setContentTitle("SMS gateway")
             .setContentText(tekst)
             .setSmallIcon(android.R.drawable.ic_dialog_email)
             .setOngoing(true)
