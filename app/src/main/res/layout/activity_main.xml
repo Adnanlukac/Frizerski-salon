@@ -13,7 +13,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Milenijum SMS"
+            android:text="SMS gateway"
             android:textSize="24sp"
             android:textStyle="bold|italic"
             android:textColor="@color/ink"
@@ -22,7 +22,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="SMS gateway za zakazivanje termina"
+            android:text="Slanje SMS poruka za više sajtova"
             android:textSize="13sp"
             android:textColor="@color/ink_soft"
             android:layout_marginBottom="20dp" />
@@ -57,12 +57,53 @@
 
         </LinearLayout>
 
-        <!-- Forma za povezivanje (vidljivo kad nije povezano) -->
+        <!-- Lista uparenih sajtova (vidljivo kad postoji bar jedan sajt) -->
+        <LinearLayout
+            android:id="@+id/connectedActions"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Upareni sajtovi"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="@color/ink"
+                android:layout_marginBottom="8dp" />
+
+            <LinearLayout
+                android:id="@+id/sitesList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+
+            <Button
+                android:id="@+id/btnTestConnection"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Testiraj vezu sa svim sajtovima"
+                android:layout_marginBottom="20dp" />
+
+        </LinearLayout>
+
+        <!-- Dodavanje novog sajta (uvijek vidljivo) -->
         <LinearLayout
             android:id="@+id/connectForm"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Dodaj sajt"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="@color/ink"
+                android:layout_marginBottom="8dp" />
 
             <TextView
                 android:layout_width="wrap_content"
@@ -76,7 +117,7 @@
                 android:id="@+id/inputSiteUrl"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:hint="https://ektuniverzal.me/milenijum/"
+                android:hint="https://ektuniverzal.me/poliklinika1/"
                 android:inputType="textUri"
                 android:background="@color/surface"
                 android:padding="12dp"
@@ -136,31 +177,7 @@
                 android:id="@+id/btnConnect"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Poveži" />
-
-        </LinearLayout>
-
-        <!-- Vidljivo kad JE povezano -->
-        <LinearLayout
-            android:id="@+id/connectedActions"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:visibility="gone">
-
-            <Button
-                android:id="@+id/btnTestConnection"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Testiraj vezu"
-                android:layout_marginBottom="10dp" />
-
-            <Button
-                android:id="@+id/btnDisconnect"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Odspoji ovaj telefon"
-                android:backgroundTint="@color/danger" />
+                android:text="Dodaj sajt" />
 
         </LinearLayout>
 
